@@ -7,8 +7,8 @@ import struct
 import unittest
 import zlib
 
-from igs_online.common.aes import AES, SBOX, RCON
-from igs_online.common.crc16 import crc16, TABLE
+from igs_online.common.aes import AES
+from igs_online.common.crc16 import crc16
 from igs_online.common.kotcp import KoTCP, PING, PONG
 from igs_online.common.packet import Reader, Writer
 from igs_online.wedance import konet, profile
@@ -17,21 +17,12 @@ from igs_online.wedance import konet, profile
 class Tables(unittest.TestCase):
     def test_crc_table_binary(self):
         # binary: _crc16Table 0x865B2A0
+        # (entry i is the CRC of the single byte i)
         raw = bytes.fromhex("0000c1c081c1400101c3c003800241c2")
-        self.assertEqual(TABLE[:8], list(struct.unpack("<8H", raw)))
+        self.assertEqual([crc16(bytes([i])) for i in range(8)], list(struct.unpack("<8H", raw)))
 
     def test_crc_arc_check(self):
         self.assertEqual(crc16(b"123456789"), 0xBB3D)          # CRC-16/ARC check value
-
-    def test_sbox_binary(self):
-        # binary: _aesSBoxTable 0x865AEA0
-        self.assertEqual(bytes(SBOX[:16]), bytes.fromhex("637c777bf26b6fc53001672bfed7ab76"))
-
-    def test_rcon_binary(self):
-        # binary: _aesKeyExpansion's table 0x8535D90 (u32 each)
-        raw = bytes.fromhex("000000000100000002000000040000000800000010000000"
-                            "2000000040000000800000001b00000036000000")
-        self.assertEqual(RCON, list(struct.unpack("<11I", raw)))
 
 
 class AesVectors(unittest.TestCase):

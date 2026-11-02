@@ -9,7 +9,11 @@ progress, rankings and versus play without the original servers.
 | We Dance Online 2 (E2000) | `igs_online.wedance` | login, members, saved progress, rankings, QR login, versus relay |
 | Percussion Master 3 (E2200) | | planned |
 
-Python 3.8+, standard library only.
+Python 3.8+ with `cryptography` (AES) and `crcmod` (CRC-16):
+
+```sh
+python -m pip install -r requirements.txt
+```
 
 ## Running
 
