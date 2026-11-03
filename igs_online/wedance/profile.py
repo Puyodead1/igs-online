@@ -28,7 +28,7 @@ BLOCKS = [("head", 0), ("upbody", 0), ("downbody", 0), ("feet", 0), ("back", 0),
 
 # after the blocks (95 bytes)
 MID = [
-    ("hide_songs", "u32"), ("v87903B8", "u32"), ("v87903BC", "u8"), ("strength", "u16"),
+    ("hide_songs", "u32"), ("crystal", "u32"), ("v87903BC", "u8"), ("strength", "u16"),
     ("coop_rank", "u16"), ("extreme_combo", "u16"), ("v87903C3", "u64"), ("feature", "u16"),
 ] + [("v%X" % (0x8790466 + 2 * i), "u16") for i in range(7)] + [
     ("v8790474", "i32"),
@@ -44,14 +44,33 @@ TAIL = [("pet%d" % i, "u16") for i in range(5)] + [
     ("pet_current", "u8"),
     ("fight_score", "i32"), ("v87903AC", "i32"), ("coop_score", "i32"), ("v87903B4", "i32"),
     ("card_id", "s20"), ("account", "u64"), ("user_feature", "u16"), ("weticket", "i32"),
-    ("v8790584", "i32"),
+    ("vip_until", "i32"),               # VIP end (unix time; > 0: VIP prices, date on the group page)
     ("cap_head", "u8"), ("cap_upbody", "u8"), ("cap_downbody", "u8"), ("cap_feet", "u8"),
     ("cap_back", "u8"), ("cap_title", "u8"), ("cap_luckybag", "u8"),
     ("v_unused", "i32"), ("v8790580", "i32"),
     ("login_dialog", "u8"),             # > 0: a login dialog (35 or 41)
-    ("activity_rate", "u16"),           # 100..1000
-    ("v_8F275E0", "u16"),
+    ("activity_rate", "u16"),           # EXP rate in percent, 100..1000
+    ("v_8F275E0", "u16"),               # > 0: dialog 41 after login
 ]
+
+# the group block (68 bytes, when the group id > 0; PDTDancerGroup)
+GROUP = [
+    ("name", "s16"), ("level", "u16"), ("leader", "s14"), ("members", "u16"), ("max_members", "u16"),
+    ("song", "u16"), ("song_level", "u8"),          # 0..4
+    ("fight_won", "i32"), ("fight_lost", "i32"), ("coop_won", "i32"), ("coop_lost", "i32"),
+    ("single_won", "i32"), ("single_lost", "i32"),
+    ("v8790536", "u8"), ("v8790538", "i32"),
+]
+
+# the mission block (36 bytes, when the mission id > 0; PDTResultMission)
+MISSION = [
+    ("song", "u16"), ("cond_a", "u8"), ("cond_b", "u8"),   # 1 perfects, 2 perfect+great+cool, 3 plays, 4 max combo
+    ("target_a", "i32"), ("target_b", "i32"), ("progress_a", "i32"), ("progress_b", "i32"),
+    ("bonus_crystal", "i32"), ("bonus_coin", "i32"), ("start", "i32"), ("end", "i32"),
+]
+
+# renamed fields (older databases)
+RENAMED = {"v87903B8": "crystal", "v8790584": "vip_until"}
 
 DEFAULTS = {
     "level": 1, "title": 33, "weticket": 25, "activity_rate": 100,
@@ -71,6 +90,14 @@ UF_FROM_OTHERS = 0x02
 UF_MODIFY_PASSWORD = 0x10
 UF_QR_LOGIN = 0x40
 UF_TRANSFER = 0x80
+
+
+def upgrade(p):
+    """rename fields stored by older versions"""
+    for old, new in RENAMED.items():
+        if old in p:
+            p.setdefault(new, p.pop(old))
+    return p
 
 
 def new_profile(uid, account=0, name=b"", sex=0, skin=0, face=0):
@@ -139,8 +166,13 @@ def build(p):
     w.u16(len(songs))
     for s in songs:
         w.u16(s)
-    w.i32(0)                            # group: none (> 0 adds 68 bytes)
-    w.i32(0)                            # mission: none (> 0 adds 36 bytes)
+    for key, fields in (("group", GROUP), ("mission", MISSION)):
+        block = p.get(key + "_block") or {}
+        gid = int(p.get(key) or 0) if block else 0
+        w.i32(gid)                      # > 0: the block follows
+        if gid > 0:
+            for k, t in fields:
+                _put(w, t, block.get(k, 0))
     return w.bytes()
 
 
@@ -157,8 +189,10 @@ def parse(data):
     for k, t in MID + TAIL:
         p[k] = _get(r, t)
     p["songs"] = [r.u16() for _ in range(r.u16())]
-    p["group"] = r.i32()
-    p["mission"] = r.i32()
+    for key, fields in (("group", GROUP), ("mission", MISSION)):
+        p[key] = r.i32()
+        if p[key] > 0:
+            p[key + "_block"] = {k: _get(r, t) for k, t in fields}
     if r.left():
         raise ValueError("%d bytes left" % r.left())
     return p
@@ -182,7 +216,7 @@ def apply_count(p, data):
     p["npc"] = r.u16()
     p["ext_info"] = r.i32()
     p["hide_songs"] = r.u32()
-    p["v87903B8"] = r.u32()
+    p["crystal"] = r.u32()
     p["v87903BC"] = r.u8()
     p["strength"] = r.u16()
     p["v87903C3"] = r.u64()
@@ -250,13 +284,14 @@ def apply_fight(p, data):
 
 
 def apply_pet(p, data):
-    """0x26D SendResultPet: u8, u8 slot (1..5), u8, u16 value"""
-    if len(data) < 5:
-        return
-    slot = data[1]
+    """0x26D SendResultPet: u8 0 chosen / 1 after a song, u8 current pet (0 none, 1..5), u16 its value"""
+    r = Reader(data)
+    r.u8()
+    slot = r.u8()
+    value = r.u16()
+    p["pet_current"] = slot if slot <= 5 else 0
     if 1 <= slot <= 5:
-        p["pet_current"] = slot
-        p["pet%d" % (slot - 1)] = data[3] | data[4] << 8
+        p["pet%d" % (slot - 1)] = min(value, 17999)
 
 
 def apply_info(p, data):

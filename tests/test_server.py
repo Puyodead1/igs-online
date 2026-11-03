@@ -71,6 +71,8 @@ class ServerFlow(unittest.TestCase):
                 c.key = KEYCPU
                 cmd, d = await c.recv()
                 self.assertEqual((cmd, d), (0x14, b"\0"))
+                cmd, d = await c.recv()
+                self.assertEqual((cmd, d), (0x13B, b"\0"))     # song popularity, none yet
                 w = Writer().raw(bytes(20)).u64(konet.account_value("123456"))
                 c.send(0x211, konet.AES_MODE, w.u64(konet.account_value("000000")).u8(0).bytes())
                 cmd, d = await c.recv()

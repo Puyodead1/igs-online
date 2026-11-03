@@ -1,0 +1,13 @@
+{
+ "_comment": "Invented mission set (IGS's never reached the cabinet). cond: [type, target]; types 1 perfects, 2 perfect+great+cool, 3 plays, 4 max combo; cond_b may be null. song: the hidden song the mission unlocks (song id). bonus_crystal / bonus_coin: extra rewards when the song is already owned. days: how long a mission stays open once given.",
+ "missions": [
+  {"id": 1, "song": 58,  "cond_a": [3, 1],   "cond_b": null,     "bonus_crystal": 300, "bonus_coin": 50,  "days": 30},
+  {"id": 2, "song": 124, "cond_a": [1, 150], "cond_b": null,     "bonus_crystal": 400, "bonus_coin": 60,  "days": 30},
+  {"id": 3, "song": 125, "cond_a": [4, 80],  "cond_b": null,     "bonus_crystal": 400, "bonus_coin": 60,  "days": 30},
+  {"id": 4, "song": 126, "cond_a": [2, 400], "cond_b": [3, 3],   "bonus_crystal": 500, "bonus_coin": 80,  "days": 30},
+  {"id": 5, "song": 127, "cond_a": [1, 300], "cond_b": [4, 120], "bonus_crystal": 600, "bonus_coin": 100, "days": 30},
+  {"id": 6, "song": 128, "cond_a": [3, 5],   "cond_b": null,     "bonus_crystal": 600, "bonus_coin": 100, "days": 30},
+  {"id": 7, "song": 196, "cond_a": [2, 800], "cond_b": [4, 150], "bonus_crystal": 800, "bonus_coin": 120, "days": 30},
+  {"id": 8, "song": 197, "cond_a": [1, 600], "cond_b": [3, 5],   "bonus_crystal": 1000, "bonus_coin": 150, "days": 30}
+ ]
+}

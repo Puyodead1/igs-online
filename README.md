@@ -2,11 +2,12 @@
 
 Local stand-in servers for IGS online arcade games, for use with
 [igs-loader](https://github.com/Puyodead1/igs-loader).  Members, saved
-progress, rankings and versus play without the original servers.
+progress, the market, groups, missions, rankings and versus play without
+the original servers.
 
 | Game | Package | Status |
 | --- | --- | --- |
-| We Dance Online 2 (E2000) | `igs_online.wedance` | login, members, saved progress, rankings, QR login, versus relay |
+| We Dance Online 2 (E2000) | `igs_online.wedance` | every online message the game has (login, members, account transfer, QR login, market, lucky bags, missions, groups, world tour settings, rankings, store bookkeeping, versus) |
 | Percussion Master 3 (E2200) | | planned |
 
 Python 3.8+ with `cryptography` (AES) and `crcmod` (CRC-16):
@@ -14,6 +15,9 @@ Python 3.8+ with `cryptography` (AES) and `crcmod` (CRC-16):
 ```sh
 python -m pip install -r requirements.txt
 ```
+
+`import-data` also needs `lupa` (Lua 5.1, to read the game's lucky bag
+script).
 
 ## Running
 
@@ -25,18 +29,44 @@ python -m igs_online wedance --listen 0.0.0.0:10000 --db /path/wedance.db serve
 Settings: `--listen` (`IGS_ONLINE_LISTEN`), `--db` (`IGS_ONLINE_DB`),
 `--admin` port on 127.0.0.1 (`IGS_ONLINE_ADMIN`, default 10002, 0 = off),
 `-v` logs every message (`IGS_ONLINE_LOG=1`).  `serve` also takes
-`--store-name first,second` (shown in rankings) and `--ticker text`.
+`--store-name first,second` (for cabinets that send no name), `--ticker
+text`, and data files replacing the defaults below: `--world`
+(`IGS_ONLINE_WORLD`), `--luckybag` (`IGS_ONLINE_LUCKYBAG`), `--missions`
+(`IGS_ONLINE_MISSIONS`).
 
-Commands (run next to a running server for `qr` and `online`):
+Commands (`qr`, `profit` and `online` talk to a running server):
 
 | Command | |
 | --- | --- |
 | `serve` | the server (default) |
 | `add <account> <password>` | a member account (keypad digits, 6..11 each) |
-| `list` | registered cabinets and members |
+| `rename <account> <name>` | a member's name |
+| `list` | registered stores and members |
 | `show <account>` | a member's stored profile (JSON) |
+| `give <account> [--crystal n] [--weticket n] [--vip-days n]` | balances, VIP |
+| `transfer <account> [--off]` | ask for an account transfer at the next login |
+| `group create <name> <leader> [--song id] [--max n]` | a dancer group |
+| `group join <group> <account>`, `group leave <account>` | membership |
+| `group list`, `group members <group>` | groups, their levels and counters |
+| `group set <group> [--name] [--song] [--max] [--leader]`, `group delete <group>` | |
+| `store [store]` | stores; with an id its coin settings, text and bookkeeping |
+| `market [--class n]` | the market catalogue with prices |
+| `missions` | the mission set |
+| `world` | the world settings in force now |
+| `luckybag [-n n]` | sample lucky bag draws |
 | `online` | connected cabinets and who plays on them |
 | `qr <account> [--store id]` | QR login: log a member in on a cabinet showing the QR code |
+| `profit [--store id]` | ask a cabinet for its bookkeeping now |
+| `import-data <WeDo/linux>` | rebuild `data/market.json` and `data/luckybag.json` from a rom set |
+
+## Data files (`igs_online/wedance/data`)
+
+| File | |
+| --- | --- |
+| `market.json` | the market catalogue: the game's `script/market.db3` (items, currencies, prices, lucky bags, tickets) |
+| `luckybag.json` | lucky bag weights and item lists: the game's `script/luckybag.lua.out` (IGS's server-side draw, shipped in the game); how attributes and uses are given is this server's |
+| `missions.json` | **invented**: eight missions (song, conditions, bonuses, days) |
+| `world.json` | **invented**: `g_wFeature`, world tour seed ("weekly", "daily" or a number) and table, EXP rate and its windows, conditions, ticker, notice |
 
 ## Pointing the loader at it
 
@@ -51,7 +81,7 @@ offline.  Details: the loader's `docs/WeDanceOnline2.md`.
 Versus needs two cabinets: two Windows loader instances can share one
 cache (each gets its own `/tmp`); in WSL give each its own `IGS_CACHE`.
 One opens a stage (on the opponent screen, OK on 开新舞台 and a mode),
-the other picks it from the list.
+the other picks it from the list after the stage is open.
 
 The first connection registers the cabinet: the server gives it a store id
 and keeps its keys; the cabinet keeps the id in its IGS027A settings
@@ -75,31 +105,41 @@ number (or under 6 digits) makes the game ask for a new one after login.
 The loader takes digits from the numeric keypad or the digit keys (5 is coin
 and 9 service: use W and D for those digits).
 
-## Implemented
+After a member's login: the play mode (打击), then 是否进入商城 (enter the
+market?), the clothes screen, where keypad keys open the player pages (1
+data, 2 schedule, 5 hidden songs, 6 achievements, 7 world tour map, 8
+pets, 9 group).  In the market: keypad 1 cards, 2 skins and faces, 3
+talks, 4 tickets (Up / Down: workshops, missions, suites, world tour), 5
+clothes, 6 lucky bags, 0 leave; Left / Right pick, OK buys.
+
+## What the server does
 
 - KoTCP framing and pings; KoNet modes plain / AES / zlib / zlib+AES,
   fragments; registration (0x21..0x24) and login (0x11..0x14) with the
-  HMAC challenge; the reply's time is real time.
-- Player login, guest login, account creation, info and password updates.
-- Profiles in SQLite: counters (0x263), wardrobe (0x265, 0x214), fight
-  results (0x268), pets, items, market purchases, WeTickets; raw play logs
-  (0x269) and other results kept for later decoding.
-- Rankings from stored results: per-song high scores (0x137); player
-  rankings by fight score, wins, co-op score, won combos, experience and
-  combo (invented mapping); store, co-op and song-pair rankings empty.
-- News ticker, notice, conditions: short defaults.  The csvlist query is
-  answered so the cabinet keeps its own list; file pushes (0x16F) are never
-  sent.
-- QR login push (0x21E) from the admin command.
-- Versus: fighter lists, challenge, accept / reject, and relays of the song
-  choice, start / end sync and the in-song 0x250 stream between two
-  cabinets.
-
-## Not implemented
-
-- The market's item catalogue, lucky bags (always "failed"), groups,
-  missions, world events, account transfer, store bookkeeping.
-- Ranking meanings beyond per-song scores are guesses.
+  HMAC challenge; the login reply carries the world settings.
+- Accounts: player, guest and QR login, creation, info and password
+  updates, account transfer (0x21C: to a new number, or onto an existing
+  account, whose balances and songs move over).
+- Profiles in SQLite: every field the game sends is kept (counters,
+  wardrobe, talks, props, pets, crystals, WeTickets, VIP, songs owned,
+  market flags, last play log); group and mission blocks are built at
+  login.
+- Market: trades checked against the catalogue (known item, no negative
+  balance; prices logged), changes saved; lucky bags drawn from the game's
+  own tables.
+- Missions: one open mission per member from `missions.json`, progress
+  and passes from 0x26E, the song unlocked, 0x161 → 0x162.
+- Groups: made from the command line, shown on the group page and the
+  versus card; counters from the play logs, level = 1 + credits / 20
+  (invented).
+- Rankings from stored results: fight and co-op (all time, this month),
+  suite score and combo, songs and co-op pairs (this month), stores (this
+  week); places pushed after results (0x262, 0x264, 0x26C); song
+  popularity (0x13B).
+- Store bookkeeping kept and shown (`store`); `profit` asks for it.
+- Versus: fighter lists, challenge, accept / refuse, relays of the song
+  choice, start / end sync and the in-song stream.
+- Update query answered "none"; a file push (0x16F) is never sent.
 
 ## Tests
 

@@ -1,0 +1,19 @@
+{
+ "_comment": "Invented defaults (IGS's own were never on the cabinet); see world.py.",
+ "feature": 0,
+ "world_seed": "weekly",
+ "world_level": 1,
+ "ping_test": 0,
+ "signup_reminder": 0,
+ "exp": {
+  "base": 100,
+  "windows": [
+   {"days": [5, 6], "from": "18:00", "to": "23:59", "rate": 150}
+  ]
+ },
+ "conditions": [
+  {"type": 1, "text": "[1,1800,2359,6,7,1.5]"}
+ ],
+ "ticker": "Welcome to We Dance Online 2 (igs-online)",
+ "notice": "igs-online: a local stand-in for the IGS servers."
+}

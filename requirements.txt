@@ -1,2 +1,3 @@
 cryptography
 crcmod
+lupa  # import-data only
