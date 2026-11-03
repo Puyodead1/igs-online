@@ -1,0 +1,41 @@
+{
+ "_invented": "IGS's event schedule, parameters and rewards never reached the cabinet: all of this file is the stand-in server's own.  Texts are the game's (boards.json).",
+ "active": [13, 14],
+ "dates": {
+  "_": "per kind: [start, end] as YYYY-MM-DD; a kind not listed runs from the 1st to the last day of this month"
+ },
+ "params": {
+  "13": {"song": 23, "class": 2},
+  "15": {"rate": 150},
+  "16": {"rate": 150},
+  "17": {"rate": 150},
+  "18": {"exp": 300},
+  "20": {"levels": [[5, 200], [10, 400], [15, 600], [20, 800], [30, 1200]]},
+  "21": {"rate": 200}
+ },
+ "notice": "歡迎來到鼓王的國度！線上排行、活動看板與龍族捕獲由 igs-online 提供。",
+ "hot_songs": [102, 109, 117, 118, 23, 22, 94, 97, 88, 92],
+ "holiday_titles": {"_": "holiday kind -> title field; index 0 at the first count of holiday cursors hit during the event, index 1 at the second",
+  "fields": {"1": 25, "2": 26, "3": 27, "4": 28, "5": 29, "6": 30, "7": 31, "8": 32, "9": 33, "10": 34},
+  "counts": [50, 300]},
+ "contest_titles": {"_": "contest kind -> title field; index i while the member's place is at most places[i]",
+  "fields": {"11": 36, "12": 37, "13": 38},
+  "places": {"11": [100, 30, 10, 1], "12": [100, 30, 10, 1], "13": [30, 1]}},
+ "contest_cursor": {"_": "taking part in the Knights' contest (13) unlocks this cursor (Knight Cursor)", "13": 2},
+ "registration_cursors": {"_": "signing up while board 18 runs unlocks these cursors (Yellow / White Chick)", "cursors": [4, 5]},
+ "dragons": {
+  "_": "board 14: up to 3 dragons in song select, shared by every cabinet; kind 0..8 picks the dragon's song (141..149), 9 a 20-point dragon.  The score a player reaches on the dragon's stage is the damage.  Catching one sets that member's grade 8 for (difficulty, kind); others who fought it get 9 (lost).",
+  "names": ["Flame", "Frost", "Thunder", "Gale", "Stone", "Shadow", "Light", "Abyss", "Jade", "Golden"],
+  "hp": 100,
+  "hp_special": 20,
+  "damage_divisor": 10000,
+  "titles": {"field": 35, "caught": [7, 10]},
+  "songs": [150, 151, 152, 153, 154, 155, 156, 157, 158]
+ },
+ "dragon2": {
+  "_": "board 22: one world dragon at a time, groups 2..4 of three on InfoDragon's board",
+  "names": ["Ancient Wyrm", "Sky Serpent", "Ember King"],
+  "hp": 300,
+  "damage_divisor": 5000
+ }
+}

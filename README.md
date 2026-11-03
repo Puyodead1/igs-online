@@ -2,13 +2,12 @@
 
 Local stand-in servers for IGS online arcade games, for use with
 [igs-loader](https://github.com/Puyodead1/igs-loader).  Members, saved
-progress, the market, groups, missions, rankings and versus play without
-the original servers.
+progress, rankings, events and versus play without the original servers.
 
 | Game | Package | Status |
 | --- | --- | --- |
 | We Dance Online 2 (E2000) | `igs_online.wedance` | every online message the game has (login, members, account transfer, QR login, market, lucky bags, missions, groups, world tour settings, rankings, store bookkeeping, versus) |
-| Percussion Master 3 (E2200) | | planned |
+| Percussion Master 3 (E2200) | `igs_online.pm3` | every online message the game has (registration, login, members and sign-up, profiles, play logs, the five ranking boards, event boards and ticker, the notice, hot songs, dragons and dragon 2, contests, store bookkeeping and info, time, game level; a "no update" patch server) |
 
 Python 3.8+ with `cryptography` (AES) and `crcmod` (CRC-16):
 
@@ -24,6 +23,7 @@ script).
 ```sh
 python -m igs_online wedance                 # listens on 127.0.0.1:10000, database wedance.db
 python -m igs_online wedance --listen 0.0.0.0:10000 --db /path/wedance.db serve
+python -m igs_online pm3                     # listens on 127.0.0.1:9999, database pm3.db, admin 9997
 ```
 
 Settings: `--listen` (`IGS_ONLINE_LISTEN`), `--db` (`IGS_ONLINE_DB`),
@@ -141,10 +141,46 @@ clothes, 6 lucky bags, 0 leave; Left / Right pick, OK buys.
   choice, start / end sync and the in-song stream.
 - Update query answered "none"; a file push (0x16F) is never sent.
 
+## Percussion Master 3
+
+```sh
+python -m igs_online pm3 [--listen host:port] [--db pm3.db] [--admin 9997] [--events file] [-v] [command]
+IGS_NET=127.0.0.1:9999 ./play.ps1 percussionmaster3_m107fa        # or play-win.ps1, run.sh
+```
+
+| Command | |
+| --- | --- |
+| `serve [--patch 9998]` | the server (default); `--patch` also answers `pcli` with "no update" |
+| `add <id> <password> [--name n] [--role 0..3]` | a member (keypad digits) |
+| `rename`, `password`, `delete`, `lock [--off]` `<id> ...` | a member's nickname, password; delete; lock out |
+| `list`, `show <id> [--raw]` | stores and members; a profile and the last play logs |
+| `give <id> [--level] [--exp] [--title field:index] [--song id] [--chart id] [--cursor n]` | change a profile |
+| `ranks [--kind 0..4] [--class 0..4]` | a ranking board |
+| `boards [--set 1,14]` | the two boards that run (`default`: `events.json`'s), pushed to cabinets online |
+| `hot [--set 23,102]` | the hot songs (default: the most played of 30 days) |
+| `dragons` | this month's dragons |
+| `store [id]` | stores; with an id its info and bookkeeping |
+| `notice [text] [--default]` | the coin page notice, pushed |
+| `online`, `time`, `level <n>`, `storeinfo [--name] [--coins]` | cabinets online; push the time, the game level, the store info |
+| `import-data <pm3>` | rebuild `data/boards.json` from the decrypted `/PM3.bin/pm3` |
+
+Data files (`igs_online/pm3/data`):
+
+| File | |
+| --- | --- |
+| `boards.json` | the board and ticker texts, contest and dragon texts, new-song lists: the game's own samples (`BoardInfo::SetFakeData`) |
+| `events.json` | **invented**: which boards run and when, contest song, EXP rates, level rewards, dragons, notice, fallback hot songs, event rewards (titles, cursors, songs) |
+
+In the game: a coin, a drum hit; on the login screen the little drums
+move (guest, login, register), the surface or `#` confirms.  Login: ID (6..11
+digits), `#`, password (4..8), `#`.  Register: yes, a new ID, `#`, a
+password twice; then the name keyboard (keypad 2 4 6 8 move, the surface
+types, `*` deletes; left of the first column, down to Finish, `#`; Yes).
+Two players log in on one cabinet (versus is local); both are saved.
 ## Tests
 
 ```sh
 python -m unittest discover -s tests
 ```
 
-Protocol notes: [docs/WeDance.md](docs/WeDance.md).
+Protocol notes: [docs/WeDance.md](docs/WeDance.md), [docs/PM3.md](docs/PM3.md).

@@ -23,9 +23,13 @@ def _hostport(s, default_port):
 
 
 def _admin(port, req):
-    with socket.create_connection(("127.0.0.1", port), timeout=5) as s:
-        s.sendall((json.dumps(req) + "\n").encode())
-        res = json.loads(s.makefile().readline())
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as s:
+            s.sendall((json.dumps(req) + "\n").encode())
+            res = json.loads(s.makefile(encoding="utf-8").readline())
+    except OSError as e:
+        print("no server on admin port %d (%s)" % (port, e))
+        return 1
     print(json.dumps(res, indent=1, ensure_ascii=False))
     return 1 if "error" in res else 0
 
@@ -362,7 +366,257 @@ def wedance(argv):
     return 2
 
 
-GAMES = {"wedance": wedance}
+def _pm3_book(cmd, data):
+    """0x132 a day's / 0x133 a month's bookkeeping (SettingData::vNetSendDayIncome / MonthIncome)"""
+    data = bytes(data)
+    if cmd in (0x132, 0x133) and len(data) >= 28:
+        y, mo, d, n, a, b, c, e, f, total, net, avg = struct.unpack_from("<HBBHHHHHHIIH", data)
+        return {"date": "%04d-%02d-%02d" % (y, mo, d) if cmd == 0x132 else "%04d-%02d" % (y, mo),
+                "plays": n, "fields": [a, b, c, e, f], "total": total, "total_less": net, "per_play": avg,
+                "tables": data[28:].hex() if cmd == 0x133 else None}
+    return {"hex": data.hex()} if data else {}
+
+
+def pm3(argv):
+    from .pm3 import profile
+    from .pm3.db import DB
+    from .pm3.events import Events, NAMES as BOARD_NAMES, CONTEST_RANK
+    from .pm3.server import Config, serve, KIND_NAMES
+
+    env = os.environ.get
+    ap = argparse.ArgumentParser(prog="python -m igs_online pm3", description="Percussion Master 3 server")
+    ap.add_argument("--listen", default=env("IGS_ONLINE_LISTEN", "127.0.0.1:9999"),
+                    help="host:port to listen on (default 127.0.0.1:9999)")
+    ap.add_argument("--db", default=env("IGS_ONLINE_DB", "pm3.db"), help="SQLite file (default pm3.db)")
+    ap.add_argument("--admin", type=int, default=int(env("IGS_ONLINE_ADMIN", "9997")),
+                    help="local admin port, 0 = none (default 9997)")
+    ap.add_argument("--events", default=env("IGS_ONLINE_EVENTS", ""), help="events file (default data/events.json)")
+    ap.add_argument("-v", "--verbose", action="count", default=int(env("IGS_ONLINE_LOG", "0")))
+    sub = ap.add_subparsers(dest="cmd")
+    s = sub.add_parser("serve", help="run the server (default)")
+    s.add_argument("--patch", type=int, default=int(env("IGS_ONLINE_PATCH", "0")),
+                   help="also answer pcli on this port with \"no update\" (0 = off)")
+    s.add_argument("--store-name", default="igs-online", help="store name in rankings when a cabinet sent none")
+    a = sub.add_parser("add", help="create a member")
+    a.add_argument("id", help="keypad ID (digits)")
+    a.add_argument("password", help="keypad password (digits)")
+    a.add_argument("--name", default="", help="nickname (13 bytes Big5)")
+    a.add_argument("--role", type=int, default=0, help="character 0..3")
+    rn = sub.add_parser("rename", help="set a member's nickname")
+    rn.add_argument("id")
+    rn.add_argument("name")
+    pw = sub.add_parser("password", help="set a member's password")
+    pw.add_argument("id")
+    pw.add_argument("password")
+    lk = sub.add_parser("lock", help="lock a member out (the game: \"this account has been locked\")")
+    lk.add_argument("id")
+    lk.add_argument("--off", action="store_true")
+    dl = sub.add_parser("delete", help="delete a member and their ranking entries")
+    dl.add_argument("id")
+    sub.add_parser("list", help="stores and members")
+    sh = sub.add_parser("show", help="a member's profile and last play logs")
+    sh.add_argument("id")
+    sh.add_argument("--raw", action="store_true", help="the 2748 profile bytes in hex")
+    gv = sub.add_parser("give", help="change a member's profile")
+    gv.add_argument("id")
+    gv.add_argument("--level", type=int)
+    gv.add_argument("--exp", type=int)
+    gv.add_argument("--title", action="append", default=[], metavar="FIELD:INDEX")
+    gv.add_argument("--song", action="append", type=int, default=[], help="unlock a hidden song (id)")
+    gv.add_argument("--chart", action="append", type=int, default=[], help="unlock a Master chart (song id)")
+    gv.add_argument("--cursor", action="append", type=int, default=[])
+    rk = sub.add_parser("ranks", help="a ranking board")
+    rk.add_argument("--kind", type=int, default=0, help="0 normal, 1 nonstop, 2 song contest, 3 score contest, 4 combo contest")
+    rk.add_argument("--class", dest="cls", type=int, default=0, help="difficulty 0..4 (kinds 0, 1)")
+    rk.add_argument("-n", type=int, default=20)
+    bd = sub.add_parser("boards", help="the event boards (and set which two run)")
+    bd.add_argument("--set", help="board kinds, e.g. 1,14 (\"default\": events.json's)")
+    sub.add_parser("dragons", help="the dragons of this month")
+    ht = sub.add_parser("hot", help="the hot songs list (0x412): set it, or back to the most played")
+    ht.add_argument("--set", help="song ids, e.g. 23,102 (\"default\": the most played of 30 days)")
+    st = sub.add_parser("store", help="registered stores and their bookkeeping")
+    st.add_argument("store", type=int, nargs="?")
+    nt = sub.add_parser("notice", help="the coin page notice: set it, and push it to the cabinets online")
+    nt.add_argument("text", nargs="?")
+    nt.add_argument("--default", action="store_true", help="back to events.json's")
+    sub.add_parser("online", help="connected cabinets and their members")
+    sub.add_parser("time", help="push the time (the game takes it only in its first 6 s)")
+    lv = sub.add_parser("level", help="push a game level (difficulty setting, SettingInfo +74)")
+    lv.add_argument("level", type=int)
+    si = sub.add_parser("storeinfo", help="push the store info (0x139) to the cabinets online")
+    si.add_argument("--name", help="store name (Big5 text)")
+    si.add_argument("--coins", type=int, help="coins per credit")
+    im = sub.add_parser("import-data", help="rebuild data/boards.json from the game")
+    im.add_argument("pm3", help="the decrypted executable, /PM3.bin/pm3")
+    args = ap.parse_args(argv)
+
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
+                        format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
+    cmd = args.cmd or "serve"
+    events = Events(args.events or None)
+    if cmd == "serve":
+        host, port = _hostport(args.listen, 9999)
+        cfg = Config(events, store_name=getattr(args, "store_name", "igs-online"))
+        try:
+            asyncio.run(serve(host, port, args.db, args.admin or None, cfg, getattr(args, "patch", 0) or None))
+        except KeyboardInterrupt:
+            pass
+        return 0
+    if cmd == "import-data":
+        from .pm3 import gamedata
+        for path in gamedata.import_all(args.pm3):
+            print(path)
+        return 0
+    if cmd in ("online", "time"):
+        return _admin(args.admin, {"cmd": cmd})
+    if cmd == "level":
+        return _admin(args.admin, {"cmd": "level", "level": args.level})
+    if cmd == "storeinfo":
+        req = {"cmd": "storeinfo"}
+        if args.name:
+            req["name"] = args.name.encode("big5", "replace").hex()
+        if args.coins is not None:
+            req["coins"] = args.coins
+        return _admin(args.admin, req)
+    db = DB(args.db)
+
+    def member(login):
+        m = db.member_by_login(login)
+        if not m:
+            print("no such member %s" % login)
+        return m
+
+    def name_of(m):
+        return profile.text(profile.name(bytes(m["profile"]))) if m else "-"
+
+    if cmd == "add":
+        if not args.id.isdigit() or not args.password.isdigit():
+            print("ID and password are keypad digits")
+            return 1
+        if db.member_by_login(args.id):
+            print("ID exists")
+            return 1
+        m = db.create_member(args.id, args.password, args.name.encode("big5", "replace")[:13], args.role)
+        print("member %d" % m["mid"])
+        return 0
+    if cmd == "list":
+        for r in db.stores():
+            info = json.loads(r["info"]) if r["info"] else {}
+            print("store %d %s registered %s, seen %s" % (r["id"], _text(bytes.fromhex(info.get("name", ""))),
+                                                          _date(r["created"]), _date(r["seen"])))
+        for m in db.members():
+            b = bytes(m["profile"])
+            print("member %d ID %s %r level %d exp %d, store %s, seen %s" % (
+                m["mid"], m["login"], name_of(m), b[25], profile.get(b, "exp"), m["store"], _date(m["seen"])))
+        return 0
+    if cmd in ("rename", "password", "delete", "show", "give", "lock"):
+        m = member(args.id)
+        if not m:
+            return 1
+        b = bytes(m["profile"])
+        if cmd == "lock":
+            locked = set(db.setting("locked") or [])
+            (locked.discard if args.off else locked.add)(m["mid"])
+            db.set_setting("locked", sorted(locked))
+            print("locked: %s" % sorted(locked))
+        elif cmd == "rename":
+            b = bytearray(b)
+            b[8:24] = args.name.encode("big5", "replace")[:13].ljust(16, b"\0")
+            db.save_profile(m["mid"], bytes(b))
+        elif cmd == "password":
+            db.set_password(m["mid"], args.password)
+        elif cmd == "delete":
+            db.delete_member(m["mid"])
+        elif cmd == "show":
+            if args.raw:
+                print(b.hex())
+                return 0
+            d = profile.summary(b)
+            d.update(member_id=m["mid"], id=m["login"], store=m["store"])
+            d["play_logs"] = [dict(profile.play_log(r["data"]), time=_date(r["time"])) for r in db.logs(m["mid"], 5)]
+            print(json.dumps(d, indent=1, ensure_ascii=False))
+        elif cmd == "give":
+            b = bytearray(b)
+            if args.level is not None:
+                b[25] = max(1, min(50, args.level))
+            if args.exp is not None:
+                profile.put(b, "exp", args.exp)
+            b = bytes(b)
+            for t in args.title:
+                f, i = (int(x) for x in t.split(":"))
+                b = profile.grant_title(b, f, i)
+            for s in args.song:
+                b = profile.grant_song(b, s)
+            for s in args.chart:
+                b = profile.grant_song(b, s, chart=True)
+            for c in args.cursor:
+                b = profile.grant_cursor(b, c)
+            db.save_profile(m["mid"], b)
+            print("member %d: level %d, exp %d, titles %s" % (m["mid"], b[25], profile.get(b, "exp"),
+                                                              profile.summary(b)["titles"]))
+        return 0
+    if cmd == "ranks":
+        board = {v: k for k, v in CONTEST_RANK.items()}.get(args.kind)
+        period = events.period(board) if board else ""
+        cls = args.cls if args.kind in (0, 1) else 0
+        print("%s, %s" % (KIND_NAMES.get(args.kind, args.kind),
+                          "difficulty %d" % cls if args.kind in (0, 1) else "period from %s" % period))
+        for i, e in enumerate(db.board(args.kind, cls, period, 0, args.n)):
+            print("%3d. %-14s %9d  combo %d, %s" % (i + 1, name_of(db.member(e["mid"])), e["value"], e["combo"] or 0,
+                                                     _date(e["time"])))
+        return 0
+    if cmd == "boards":
+        if args.set:
+            db.set_setting("active", None if args.set == "default" else [int(x) for x in args.set.split(",")])
+        active = db.setting("active")
+        for k in events.active(active):
+            a, z = events.dates(k)
+            print("board %d %s (%s .. %s)%s: %s" % (k, BOARD_NAMES.get(k, ""), a, z,
+                                                    "" if events.running(k, active) else " not running",
+                                                    events.texts["boards"].get(str(k), "")))
+        if args.set:
+            _admin(args.admin, {"cmd": "boards"})          # cabinets online get them now
+        return 0
+    if cmd == "hot":
+        if args.set:
+            db.set_setting("hot", None if args.set == "default" else [int(x) for x in args.set.split(",")])
+        print("hot songs: %s" % (db.setting("hot") or "%s (most played)" % db.popular()))
+        return 0
+    if cmd == "dragons":
+        for board in (14, 22):
+            for d in db.dragons(board, events.period(board), alive=False):
+                print("board %d dragon %d %s, difficulty/group %d kind %d, hp %d/%d, %s" % (
+                    board, d["id"], d["name"], d["cls"], d["kind"], d["hp"], d["max_hp"],
+                    "caught by %s %s" % (name_of(db.member(d["catcher"])), _date(d["caught"])) if d["catcher"]
+                    else "free"))
+        return 0
+    if cmd == "notice":
+        if args.default:
+            db.set_setting("notice", None)
+        elif args.text is not None:
+            db.set_setting("notice", args.text)
+        text = db.setting("notice")
+        print("notice: %s" % (text if text is not None else events.data.get("notice", "")))
+        return _admin(args.admin, {"cmd": "notice", "text": text})
+    if cmd == "store":
+        rows = db.stores() if args.store is None else [r for r in db.stores() if r["id"] == args.store]
+        for r in rows:
+            info = json.loads(r["info"]) if r["info"] else {}
+            print("store %d %s registered %s, seen %s, versions %s" % (
+                r["id"], _text(bytes.fromhex(info.get("name", ""))), _date(r["created"]), _date(r["seen"]),
+                r["versions"]))
+            if info:
+                print("  info: %s" % {k: v for k, v in info.items() if k != "name"})
+            if args.store is not None:
+                for c in (0x132, 0x133, 0x135, 0x136):
+                    for b in db.book(r["id"], c, 3):
+                        print("  0x%03X at %s: %s" % (c, _date(b["time"]),
+                                                       json.dumps(_pm3_book(c, b["data"]), ensure_ascii=False)))
+        return 0
+    return 2
+
+
+GAMES = {"wedance": wedance, "pm3": pm3}
 
 
 def main(argv=None):
